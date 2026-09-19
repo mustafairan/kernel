@@ -47,14 +47,13 @@ jobs:
             curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           fi
 
-      - name: Config'leri aç
+      - name: Config'leri ekle + kanonikleştir
         working-directory: kernel
         run: |
           cfg=common/arch/arm64/configs/gki_defconfig
-          {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KPROBES=y"          # kprobe hook (GKI default), CONFIG_KSU_MANUAL_HOOK KAPALI kalsın
-          } >> "$cfg"
+          # KPROBES zaten GKI default =y (tekrar eklemek "reassigning" uyarısı + mismatch yapar).
+          # CONFIG_KSU_MANUAL_HOOK KAPALI kalsın -> kprobe hook kullanılır.
+          echo "CONFIG_KSU=y" >> "$cfg"
           if [ "${{ inputs.susfs }}" = "true" ]; then
             {
               echo "CONFIG_KSU_SUSFS=y"
@@ -64,6 +63,9 @@ jobs:
               echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
             } >> "$cfg"
           fi
+          # kleaf savedefconfig: gki_defconfig'i minimize kanonik forma geri yazar,
+          # "savedefconfig does not match" (check_defconfig) hatasını çözer.
+          tools/bazel run --config=fast //common:kernel_aarch64_config -- savedefconfig
 
       - name: GKI kernel derle (arm64, 4k)
         working-directory: kernel
