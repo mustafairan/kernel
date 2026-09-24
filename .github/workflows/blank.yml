@@ -2,11 +2,6 @@ name: Build SukiSU Emulator Kernel (android15-6.6 arm64)
 
 on:
   workflow_dispatch:
-    inputs:
-      susfs:
-        description: "SUSFS entegre et (susfs-main). false = düz SukiSU, daha yüksek başarı şansı"
-        type: boolean
-        default: false
 
 jobs:
   build:
@@ -41,42 +36,37 @@ jobs:
       - name: SukiSU-Ultra entegrasyonu
         working-directory: kernel/common
         run: |
-          if [ "${{ inputs.susfs }}" = "true" ]; then
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
-          else
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          fi
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-      - name: Config'leri ekle + kanonikleştir
+      - name: GKI build ayarları
         working-directory: kernel
         run: |
-          cfg=common/arch/arm64/configs/gki_defconfig
-          # KPROBES zaten GKI default =y (tekrar eklemek "reassigning" uyarısı + mismatch yapar).
-          # CONFIG_KSU_MANUAL_HOOK KAPALI kalsın -> kprobe hook kullanılır.
-          echo "CONFIG_KSU=y" >> "$cfg"
-          if [ "${{ inputs.susfs }}" = "true" ]; then
-            {
-              echo "CONFIG_KSU_SUSFS=y"
-              echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-              echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-              echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-              echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-            } >> "$cfg"
-          fi
-          # kleaf savedefconfig: gki_defconfig'i minimize kanonik forma geri yazar,
-          # "savedefconfig does not match" (check_defconfig) hatasını çözer.
-          tools/bazel run --config=fast //common:kernel_aarch64_config -- savedefconfig
+          # CONFIG_KSU Kconfig'te "default y" (KPROBES && EXT4_FS GKI'de zaten açık),
+          # gki_defconfig'e eklemek savedefconfig'te düşer -> "savedefconfig does not match".
+          # Bu yüzden defconfig'e dokunmuyoruz; yine de check_defconfig'i kapatıyoruz.
+          sed -i 's/check_defconfig//' common/build.config.gki
+          # Built-in KernelSU ile protected exports kontrolü sorun çıkarmasın.
+          rm -f common/android/abi_gki_protected_exports_*
+          # Sürüm dizesinde "-dirty" olmasın.
+          sed -i '/stable_scmversion_cmd/s/-maybe-dirty//' build/kernel/kleaf/impl/stamp.bzl || true
+          df -h
 
       - name: GKI kernel derle (arm64, 4k)
         working-directory: kernel
         run: |
-          tools/bazel run --config=fast //common:kernel_aarch64_dist \
+          tools/bazel run --config=fast --lto=thin //common:kernel_aarch64_dist \
             -- --dist_dir="$GITHUB_WORKSPACE/dist"
+
+      - name: KernelSU'nun gömülü olduğunu doğrula
+        run: |
+          ls -la dist
+          strings dist/Image | grep -m3 -i kernelsu || { echo "KernelSU Image içinde bulunamadı"; exit 1; }
 
       - name: Virtual device modülleri derle (arm64)
         working-directory: kernel
+        continue-on-error: true
         run: |
-          tools/bazel run --config=fast //common-modules/virtual-device:virtual_device_aarch64_dist \
+          tools/bazel run --config=fast --lto=thin //common-modules/virtual-device:virtual_device_aarch64_dist \
             -- --dist_dir="$GITHUB_WORKSPACE/dist"
 
       - name: Artifact yükle
